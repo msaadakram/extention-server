@@ -1,0 +1,5 @@
+node_modules
+.env
+# Leaderboard titles should be clean in the repository
+.DS_Store
+package-lock.json
