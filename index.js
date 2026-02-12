@@ -9,27 +9,18 @@ const SubjectGroup = require('./models/SubjectGroup');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS — allow extension and website origins
-const allowedOrigins = [
-    'chrome-extension://*',
-    'https://ucplivegrading.vercel.app',
-    'https://extention-server-two.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000'
-];
-
-app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, extensions)
-        if (!origin) return callback(null, true);
-        // Allow any chrome-extension origin
-        if (origin.startsWith('chrome-extension://')) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
-        callback(new Error('Not allowed by CORS'));
-    }
-}));
+// CORS — allow all origins for debugging connection issue
+app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+
+// Global error handler for JSON parsing or other middleware errors
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).send({ error: "Invalid JSON payload" });
+    }
+    next();
+});
 
 // MongoDB Connection — cached for Vercel serverless
 let isConnected = false;
