@@ -68,7 +68,8 @@ app.post('/api/save-grades', async (req, res) => {
             assessments,
             classAverage,
             overallPercentage,
-            grade
+            grade,
+            timestamp: new Date()
         };
 
         await Grade.findOneAndUpdate(
@@ -137,7 +138,7 @@ app.get('/api/leaderboard', async (req, res) => {
 
         const grades = await Grade.find(query)
             .sort({ overallPercentage: -1 })
-            .select('studentName studentImage overallPercentage grade studentId assessments');
+            .select('studentName studentImage overallPercentage grade studentId assessments timestamp');
 
         const cleanedGrades = grades.map(g => {
             const gradeObj = g.toObject();
