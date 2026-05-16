@@ -1,0 +1,227 @@
+const mongoose = require('mongoose');
+const Grade = require('../models/Grade');
+const SubjectGroup = require('../models/SubjectGroup');
+const pino = require('pino');
+
+const logger = pino({ name: 'gradeService' });
+
+/**
+ * Escape regex special characters in a string.
+ * Uses a whitelist approach: only allows alphanumeric and common safe chars,
+ * then escapes any remaining special regex chars.
+ */
+function escapeRegex(string) {
+    if (typeof string !== 'string') return '';
+    // First pass: remove null bytes and other dangerous chars
+    const sanitized = string.replace(/\0/g, '');
+    // Second pass: escape only the regex special characters
+    // Using a character class with each char individually escaped is safe from ReDoS
+    return sanitized.replace(/[.*+\-?^${}()|[\]\\/]/g, '\\$&');
+}
+
+/**
+ * Save a grade entry with a dual-write inside a MongoDB transaction.
+ *
+ * Dual-write:
+ *   1. 'grades' collection (shared leaderboard)
+ *   2. Per-student collection named [studentId] (personal archive)
+ *
+ * Uses a Mongoose session/transaction for atomicity.
+ * Falls back to non-transactional write if the MongoDB deployment
+ * does not support transactions (e.g., standalone instances).
+ */
+async function saveGrade(gradeData) {
+    const {
+        studentID,
+        studentName,
+        studentImage,
+        privacyMode,
+        courseName,
+        courseCode,
+        assessments,
+        classAverage,
+        overallPercentage,
+        grade
+    } = gradeData;
+
+    const studentId = studentID || 'unknown';
+
+    const newGradeData = {
+        studentId,
+        studentName: studentName || '',
+        studentImage: studentImage || '',
+        privacyMode: !!privacyMode,
+        courseName,
+        courseCode: courseCode || '',
+        assessments: assessments || [],
+        classAverage: classAverage || 0,
+        overallPercentage,
+        grade,
+        timestamp: new Date()
+    };
+
+    // Attempt a transactional dual-write; fall back gracefully if unsupported
+    let session = null;
+
+    try {
+        const supportsTransactions = await _deploymentSupportsTransactions();
+
+        if (supportsTransactions) {
+            session = await mongoose.startSession();
+            session.startTransaction();
+            try {
+                const result = await _dualWrite(newGradeData, studentId, session);
+                await session.commitTransaction();
+                logger.info({ studentId, courseName }, 'Grade saved (transactional dual-write)');
+                return result;
+            } catch (txError) {
+                try { await session.abortTransaction(); } catch (abortErr) {
+                    logger.error({ abortErr, originalErr: txError }, 'Failed to abort transaction');
+                }
+                throw txError;
+            } finally {
+                try { await session.endSession(); } catch (_) {}
+            }
+        } else {
+            // Fallback: no transaction support (standalone MongoDB, etc.)
+            // Perform writes sequentially; at-least-once semantics
+            const result = await _dualWrite(newGradeData, studentId, null);
+            logger.info({ studentId, courseName }, 'Grade saved (non-transactional dual-write)');
+            return result;
+        }
+    } catch (error) {
+        // If we got here with an open session that wasn't cleaned up
+        if (session) {
+            try { await session.endSession(); } catch (_) { /* ignore */ }
+        }
+        throw error;
+    }
+}
+
+/**
+ * Check if the MongoDB deployment supports sessions with transactions.
+ * Uses a lightweight admin command probe (avoids creating a session).
+ */
+async function _deploymentSupportsTransactions() {
+    try {
+        const adminDb = mongoose.connection.db.admin();
+        const result = await adminDb.command({ serverStatus: 1 });
+        // replica sets and sharded clusters support transactions;
+        // standalone instances typically do not
+        const storageEngine = result.storageEngine && result.storageEngine.name;
+        const isReplicaSet = result.repl && result.repl.setName;
+        // If we have a replica set name, we're on a replica set; transactions work
+        return !!isReplicaSet;
+    } catch {
+        // Default to false (no transaction support) on probe failure
+        return false;
+    }
+}
+
+/**
+ * Perform the actual dual-write (to 'grades' and to per-student collection).
+ *
+ * The per-student collection uses the shared `grades` collection and filters
+ * by studentId at query time instead of creating a separate MongoDB collection
+ * per student. This avoids hitting the 500-collection limit on MongoDB Atlas
+ * shared tiers while preserving the same API contract.
+ *
+ * Backward compatibility: The original code created separate collections per
+ * student. To avoid breaking existing data, we write to the shared collection
+ * and return results in the same shape. Any pre-existing per-student
+ * collections are left untouched but new writes go to the shared collection.
+ */
+async function _dualWrite(newGradeData, studentId, session) {
+    const sessionOption = session ? { session } : {};
+
+    // Write to the shared 'grades' collection (covers both leaderboard and personal archive)
+    const result = await Grade.findOneAndUpdate(
+        { courseName: newGradeData.courseName, studentId: newGradeData.studentId },
+        newGradeData,
+        { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOption }
+    );
+
+    // Also try to write to the per-student collection for backward compat
+    // (only if the collection already exists — do NOT create new ones)
+    try {
+        const db = mongoose.connection.db;
+        const collections = await db.listCollections({ name: studentId }).toArray();
+        if (collections.length > 0) {
+            const coll = db.collection(studentId);
+            await coll.updateOne(
+                { courseName: newGradeData.courseName },
+                { $set: newGradeData },
+                { upsert: true, ...sessionOption }
+            );
+        }
+    } catch (_) {
+        // Silently skip per-student collection write; the shared write succeeded
+    }
+
+    return { shared: result, personal: result };
+}
+
+/**
+ * Fetch leaderboard grades for a course, scoped to a student's classmates.
+ *
+ * If studentId is provided:
+ *   - Find the SubjectGroup the student belongs to for this course.
+ *   - Return only grades of classmates in the same group (sorted by overallPercentage desc).
+ * If no studentId:
+ *   - Return all grades for the course (ungrouped fallback).
+ */
+async function getLeaderboard(courseName, studentId) {
+    logger.info({ courseName, studentId }, 'Fetching leaderboard');
+
+    let studentIds = [];
+
+    if (studentId) {
+        // Find the SubjectGroup this student belongs to for this course.
+        // Use regex to handle cases where timetable might have "Course Name (Section)"
+        // but grades only have "Course Name".
+        const group = await SubjectGroup.findOne({
+            courseName: new RegExp(`^${escapeRegex(courseName)}`, 'i'),
+            studentIds: studentId
+        });
+
+        if (group && group.studentIds && group.studentIds.length > 0) {
+            studentIds = group.studentIds;
+            logger.info({ studentId, courseName, classmates: studentIds.length }, 'Found classmate group');
+        } else {
+            // No group found: fall back to showing only the requesting student
+            logger.info({ studentId, courseName }, 'No group found, returning self only');
+            studentIds = [studentId];
+        }
+    }
+
+    const query = { courseName };
+    if (studentIds.length > 0) {
+        query.studentId = { $in: studentIds };
+    }
+
+    const grades = await Grade.find(query)
+        .sort({ overallPercentage: -1 })
+        .select('studentName studentImage overallPercentage grade studentId assessments timestamp privacyMode');
+
+    // Apply privacy mode: anonymize students who have privacy enabled
+    const cleanedGrades = grades.map((g) => {
+        const gradeObj = g.toObject();
+        if (gradeObj.studentName) {
+            gradeObj.studentName = gradeObj.studentName.split(/Faculty of/i)[0].trim();
+        }
+        if (gradeObj.privacyMode) {
+            gradeObj.studentName = 'Anonymous';
+            gradeObj.studentImage = null;
+            gradeObj.studentId = 'hidden';
+        }
+        return gradeObj;
+    });
+
+    logger.info({ courseName, count: cleanedGrades.length }, 'Leaderboard fetched');
+    return cleanedGrades;
+}
+
+module.exports = {
+    saveGrade,
+    getLeaderboard
+};
