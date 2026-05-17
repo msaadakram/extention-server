@@ -36,6 +36,8 @@ async function saveGrade(gradeData) {
         studentName,
         studentImage,
         privacyMode,
+        hideName,
+        hidePhoto,
         courseName,
         courseCode,
         assessments,
@@ -51,6 +53,8 @@ async function saveGrade(gradeData) {
         studentName: studentName || '',
         studentImage: studentImage || '',
         privacyMode: !!privacyMode,
+        hideName: !!hideName,
+        hidePhoto: !!hidePhoto,
         courseName,
         courseCode: courseCode || '',
         assessments: assessments || [],
@@ -80,7 +84,7 @@ async function saveGrade(gradeData) {
                 }
                 throw txError;
             } finally {
-                try { await session.endSession(); } catch (_) {}
+                try { await session.endSession(); } catch (_) { }
             }
         } else {
             // Fallback: no transaction support (standalone MongoDB, etc.)
@@ -201,18 +205,22 @@ async function getLeaderboard(courseName, studentId) {
 
     const grades = await Grade.find(query)
         .sort({ overallPercentage: -1 })
-        .select('studentName studentImage overallPercentage grade studentId assessments timestamp privacyMode');
+        .select('studentName studentImage overallPercentage grade studentId assessments timestamp privacyMode hideName hidePhoto');
 
-    // Apply privacy mode: anonymize students who have privacy enabled
+    // Apply privacy: granular hideName/hidePhoto with backward compat for old privacyMode
     const cleanedGrades = grades.map((g) => {
         const gradeObj = g.toObject();
         if (gradeObj.studentName) {
             gradeObj.studentName = gradeObj.studentName.split(/Faculty of/i)[0].trim();
         }
-        if (gradeObj.privacyMode) {
+        const shouldHideName = gradeObj.hideName || gradeObj.privacyMode;
+        const shouldHidePhoto = gradeObj.hidePhoto || gradeObj.privacyMode;
+        if (shouldHideName) {
             gradeObj.studentName = 'Anonymous';
-            gradeObj.studentImage = null;
             gradeObj.studentId = 'hidden';
+        }
+        if (shouldHidePhoto) {
+            gradeObj.studentImage = null;
         }
         return gradeObj;
     });

@@ -14,6 +14,8 @@ const GradeSchema = new mongoose.Schema({
     studentName: { type: String, required: false },
     studentImage: { type: String, required: false },
     privacyMode: { type: Boolean, default: false },
+    hideName: { type: Boolean, default: false },
+    hidePhoto: { type: Boolean, default: false },
     courseName: { type: String, required: true },
     courseCode: { type: String, required: false },
     assessments: { type: [AssessmentSchema], required: false },

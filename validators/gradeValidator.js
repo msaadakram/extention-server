@@ -18,6 +18,8 @@ const saveGradesSchema = Joi.object({
     studentName: Joi.string().trim().allow('').optional().default(''),
     studentImage: Joi.string().allow('').optional().default(''),
     privacyMode: Joi.boolean().optional().default(false),
+    hideName: Joi.boolean().optional().default(false),
+    hidePhoto: Joi.boolean().optional().default(false),
     courseName: Joi.string().trim().min(1).required().messages({
         'string.empty': 'courseName is required',
         'any.required': 'courseName is required'
