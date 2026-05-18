@@ -17,6 +17,7 @@ const healthRoutes = require('./routes/health');
 const gradesRoutes = require('./routes/grades');
 const timetableRoutes = require('./routes/timetable');
 const studentsRoutes = require('./routes/students');
+const creditRoutes = require('./routes/credits');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -96,6 +97,8 @@ app.use(async (req, res, next) => {
 app.use('/api', gradesRoutes);
 app.use('/api', timetableRoutes);
 app.use('/api', studentsRoutes);
+app.use('/api', creditRoutes);
+
 // Global error handler (must be last)
 // ---------------------------------------------------------------------------
 
