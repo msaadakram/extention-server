@@ -1,83 +1,90 @@
-const Credit = require('../models/Credit');
+const mongoose = require('mongoose');
 const pino = require('pino');
 
 const logger = pino({ name: 'creditService' });
+const CREDITS_DEFAULT = 10;
 
 /**
- * Get credits for a student.
- * If no record exists, create one with the default of 10 credits.
+ * Get or create a credit document in the EXISTING 'grades' collection.
+ * We store credits as a separate document with studentId + credits field
+ * INSIDE the 'grades' collection to avoid MongoDB Atlas M0 500-collection limit.
  *
- * @param {string} studentId
- * @returns {Promise<{ studentId: string, credits: number }>}
+ * We use a special courseName prefix "__credits__" to distinguish from grade docs.
  */
+const CREDITS_COURSE_NAME = '__credits__';
+
+async function _getOrCreate(studentId) {
+    const db = mongoose.connection.db;
+    if (!db) throw new Error('No database connection');
+
+    const collection = db.collection('grades');
+
+    let doc = await collection.findOne({
+        studentId: studentId,
+        courseName: CREDITS_COURSE_NAME
+    });
+
+    if (!doc) {
+        await collection.insertOne({
+            studentId: studentId,
+            courseName: CREDITS_COURSE_NAME,
+            overallPercentage: 0,
+            grade: 'N/A',
+            credits: CREDITS_DEFAULT,
+            timestamp: new Date()
+        });
+        doc = await collection.findOne({
+            studentId: studentId,
+            courseName: CREDITS_COURSE_NAME
+        });
+    }
+
+    // Ensure credits field exists (migration from old format)
+    if (doc && doc.credits === undefined) {
+        await collection.updateOne(
+            { _id: doc._id },
+            { $set: { credits: CREDITS_DEFAULT } }
+        );
+        doc.credits = CREDITS_DEFAULT;
+    }
+
+    return doc;
+}
+
 async function getCredits(studentId) {
     logger.info({ studentId }, 'Fetching credits');
-
-    let record = await Credit.findOne({ studentId });
-
-    if (!record) {
-        logger.info({ studentId }, 'No credit record found, creating with default');
-        record = await Credit.create({ studentId, credits: 10 });
-    }
-
-    return { studentId: record.studentId, credits: record.credits };
+    const doc = await _getOrCreate(studentId);
+    return { studentId: doc.studentId, credits: doc.credits };
 }
 
-/**
- * Deduct one credit from a student's balance.
- * Will not go below 0.
- *
- * @param {string} studentId
- * @returns {Promise<{ studentId: string, credits: number }>}
- */
 async function deductCredit(studentId) {
     logger.info({ studentId }, 'Deducting credit');
+    const doc = await _getOrCreate(studentId);
 
-    let record = await Credit.findOne({ studentId });
+    const newCredits = Math.max(0, (doc.credits || 0) - 1);
+    const db = mongoose.connection.db;
+    await db.collection('grades').updateOne(
+        { _id: doc._id },
+        { $set: { credits: newCredits, timestamp: new Date() } }
+    );
 
-    if (!record) {
-        logger.info({ studentId }, 'No credit record found, creating with default then deducting');
-        record = await Credit.create({ studentId, credits: 10 });
-    }
-
-    if (record.credits > 0) {
-        record.credits -= 1;
-        await record.save();
-    }
-
-    logger.info({ studentId, credits: record.credits }, 'Credit deducted');
-
-    return { studentId: record.studentId, credits: record.credits };
+    logger.info({ studentId, credits: newCredits }, 'Credit deducted');
+    return { studentId: doc.studentId, credits: newCredits };
 }
 
-/**
- * Add credits to a student's balance.
- * If no record exists, create one with the default plus the given amount.
- *
- * @param {string} studentId
- * @param {number} amount — positive integer
- * @returns {Promise<{ studentId: string, credits: number }>}
- */
 async function addCredits(studentId, amount) {
     logger.info({ studentId, amount }, 'Adding credits');
+    const doc = await _getOrCreate(studentId);
 
-    let record = await Credit.findOne({ studentId });
+    const newCredits = (doc.credits || 0) + amount;
+    const db = mongoose.connection.db;
+    await db.collection('grades').updateOne(
+        { _id: doc._id },
+        { $set: { credits: newCredits, timestamp: new Date() } }
+    );
 
-    if (!record) {
-        logger.info({ studentId, amount }, 'No credit record found, creating with default + amount');
-        record = await Credit.create({ studentId, credits: 10 + amount });
-    } else {
-        record.credits += amount;
-        await record.save();
-    }
-
-    logger.info({ studentId, credits: record.credits }, 'Credits added');
-
-    return { studentId: record.studentId, credits: record.credits };
+    logger.info({ studentId, credits: newCredits }, 'Credits added');
+    return { studentId: doc.studentId, credits: newCredits };
 }
 
-module.exports = {
-    getCredits,
-    deductCredit,
-    addCredits
-};
+module.exports = { getCredits, deductCredit, addCredits };
