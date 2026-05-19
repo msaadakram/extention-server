@@ -4,47 +4,51 @@ const pino = require('pino');
 const logger = pino({ name: 'creditService' });
 const CREDITS_DEFAULT = 10;
 
-/**
- * Get or create a credit document in the EXISTING 'grades' collection.
- * We store credits as a separate document with studentId + credits field
- * INSIDE the 'grades' collection to avoid MongoDB Atlas M0 500-collection limit.
- *
- * We use a special courseName prefix "__credits__" to distinguish from grade docs.
- */
-const CREDITS_COURSE_NAME = '__credits__';
+// Store credits in 'grades' collection (no new collection = no limit hit)
+const COURSE = '__credits__';
 
 async function _getOrCreate(studentId) {
     const db = mongoose.connection.db;
     if (!db) throw new Error('No database connection');
 
-    const collection = db.collection('grades');
+    const coll = db.collection('grades');
 
-    let doc = await collection.findOne({
-        studentId: studentId,
-        courseName: CREDITS_COURSE_NAME
-    });
-
-    if (!doc) {
-        await collection.insertOne({
-            studentId: studentId,
-            courseName: CREDITS_COURSE_NAME,
-            overallPercentage: 0,
-            grade: 'N/A',
-            credits: CREDITS_DEFAULT,
-            timestamp: new Date()
-        });
-        doc = await collection.findOne({
-            studentId: studentId,
-            courseName: CREDITS_COURSE_NAME
-        });
+    // Try find existing
+    let doc = null;
+    try {
+        doc = await coll.findOne({ studentId, courseName: COURSE });
+    } catch (e) {
+        logger.error({ err: e }, 'findOne failed in _getOrCreate');
+        throw e;
     }
 
-    // Ensure credits field exists (migration from old format)
-    if (doc && doc.credits === undefined) {
-        await collection.updateOne(
-            { _id: doc._id },
-            { $set: { credits: CREDITS_DEFAULT } }
-        );
+    if (!doc) {
+        try {
+            await coll.insertOne({
+                studentId,
+                courseName: COURSE,
+                overallPercentage: 0,
+                grade: 'N/A',
+                credits: CREDITS_DEFAULT,
+                timestamp: new Date()
+            });
+            doc = { studentId, courseName: COURSE, credits: CREDITS_DEFAULT };
+        } catch (e) {
+            // Duplicate key race - try find again
+            if (e.code === 11000) {
+                doc = await coll.findOne({ studentId, courseName: COURSE });
+            } else {
+                logger.error({ err: e }, 'insertOne failed in _getOrCreate');
+                throw e;
+            }
+        }
+    }
+
+    if (!doc) {
+        throw new Error('Failed to get or create credit record for ' + studentId);
+    }
+
+    if (doc.credits === undefined || doc.credits === null) {
         doc.credits = CREDITS_DEFAULT;
     }
 
@@ -60,8 +64,8 @@ async function getCredits(studentId) {
 async function deductCredit(studentId) {
     logger.info({ studentId }, 'Deducting credit');
     const doc = await _getOrCreate(studentId);
-
     const newCredits = Math.max(0, (doc.credits || 0) - 1);
+
     const db = mongoose.connection.db;
     await db.collection('grades').updateOne(
         { _id: doc._id },
@@ -75,8 +79,8 @@ async function deductCredit(studentId) {
 async function addCredits(studentId, amount) {
     logger.info({ studentId, amount }, 'Adding credits');
     const doc = await _getOrCreate(studentId);
-
     const newCredits = (doc.credits || 0) + amount;
+
     const db = mongoose.connection.db;
     await db.collection('grades').updateOne(
         { _id: doc._id },

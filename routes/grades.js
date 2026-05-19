@@ -11,12 +11,11 @@ const logger = pino({ name: 'grades' });
 
 /**
  * POST /api/save-grades
- * Save a grade entry. Dual-writes to shared 'grades' collection and
- * per-student collection using a MongoDB transaction.
+ * Save a grade entry.
  */
 router.post('/save-grades', gradeSaveLimiter, validate(saveGradesSchema), async (req, res, next) => {
     try {
-        const result = await gradeService.saveGrade(req.body);
+        await gradeService.saveGrade(req.body);
         res.status(201).json({ message: 'Saved successfully' });
     } catch (error) {
         next(error);
@@ -25,34 +24,46 @@ router.post('/save-grades', gradeSaveLimiter, validate(saveGradesSchema), async 
 
 /**
  * GET /api/leaderboard
- * Fetch leaderboard for a course, scoped to a student's classmates
- * (via SubjectGroup).
+ * Fetch leaderboard for a course, scoped to a student's classmates (via SubjectGroup).
+ * With studentId: checks + deducts credits.
+ * Without studentId: bare fetch (no credit logic).
  */
 router.get('/leaderboard', readLimiter, validateQuery(leaderboardQuerySchema), async (req, res, next) => {
     try {
         const { courseName, studentId } = req.query;
 
-        // Credit check: if studentId is provided, verify they have credits
+        // Only check/deduct credits when studentId is provided
         if (studentId) {
-            const creditRecord = await creditService.getCredits(studentId);
-            if (creditRecord.credits < 1) {
-                return res.status(402).json({
-                    error: 'No credits remaining',
-                    code: 'NO_CREDITS',
-                    credits: 0
-                });
+            try {
+                const creditRecord = await creditService.getCredits(studentId);
+                if (creditRecord.credits < 1) {
+                    return res.status(402).json({
+                        error: 'No credits remaining',
+                        code: 'NO_CREDITS',
+                        credits: 0
+                    });
+                }
+            } catch (creditErr) {
+                // If credit check fails (e.g. DB issue), log but don't block leaderboard
+                logger.error({ err: creditErr, studentId }, 'Credit check failed, proceeding without deduction');
             }
         }
 
         const grades = await gradeService.getLeaderboard(courseName, studentId || null);
 
-        // Deduct a credit after successful leaderboard fetch
+        // Deduct credit if studentId was provided and credit check passed
         if (studentId) {
-            const updatedCredits = await creditService.deductCredit(studentId);
-            res.json({ grades, remainingCredits: updatedCredits.credits });
-        } else {
-            res.json({ grades });
+            try {
+                const updatedCredits = await creditService.deductCredit(studentId);
+                return res.json({ grades, remainingCredits: updatedCredits.credits });
+            } catch (deductErr) {
+                logger.error({ err: deductErr, studentId }, 'Credit deduction failed');
+                // Still return grades even if deduction failed
+                return res.json({ grades });
+            }
         }
+
+        res.json({ grades });
     } catch (error) {
         next(error);
     }

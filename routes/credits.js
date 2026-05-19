@@ -18,6 +18,7 @@ router.get('/credits/:studentId', readLimiter, validateParams(getCreditsParamsSc
         const result = await creditService.getCredits(studentId);
         res.json(result);
     } catch (error) {
+        logger.error({ err: error, studentId: req.params.studentId }, 'credits GET failed');
         next(error);
     }
 });
@@ -32,6 +33,7 @@ router.post('/credits/deduct', gradeSaveLimiter, validate(deductCreditSchema), a
         const result = await creditService.deductCredit(studentId);
         res.json(result);
     } catch (error) {
+        logger.error({ err: error, body: req.body }, 'credits POST deduct failed');
         next(error);
     }
 });
