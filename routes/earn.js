@@ -4,10 +4,10 @@ const express = require("express");
 const crypto = require("crypto");
 const pino = require("pino");
 
-const User = require("../models/EarnUser");
 const RewardToken = require("../models/RewardToken");
 const { earnGenerateLimiter } = require("../middleware/earnRateLimiter");
 const { generateTokenSchema } = require("../validators/earnValidator");
+const creditService = require("../services/creditService");
 
 const router = express.Router();
 const logger = pino({
@@ -90,33 +90,23 @@ router.get("/verify/:token", async (req, res) => {
       });
     }
 
-    // Find or create user
-    let user = await User.findOne({ userId: rewardToken.userId });
-
-    if (!user) {
-      user = await User.create({
-        userId: rewardToken.userId,
-        credits: 0,
-      });
-    }
-
-    // Add credits
-    user.credits += CREDITS_REWARD;
-    await user.save();
+    // Add credits to the creditService system (uses '__credits__' courseName)
+    // This is the same system the extension reads via GET /api/credits/:studentId
+    const creditResult = await creditService.addCredits(rewardToken.userId, CREDITS_REWARD);
 
     // Mark token as used
     rewardToken.used = true;
     await rewardToken.save();
 
     logger.info(
-      { userId: rewardToken.userId, credits: user.credits },
+      { userId: rewardToken.userId, credits: creditResult.credits },
       "Credits rewarded"
     );
 
     return res.json({
       success: true,
       message: "Credits added successfully",
-      credits: user.credits,
+      credits: creditResult.credits,
     });
   } catch (err) {
     logger.error(err, "Error verifying token");
@@ -141,18 +131,11 @@ router.get("/credits/:userId", async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ userId: userId.trim() });
-
-    if (!user) {
-      return res.status(404).json({
-        error: "User not found",
-        code: "USER_NOT_FOUND",
-      });
-    }
+    const result = await creditService.getCredits(userId.trim());
 
     return res.json({
-      userId: user.userId,
-      credits: user.credits,
+      userId: userId.trim(),
+      credits: result.credits,
     });
   } catch (err) {
     logger.error(err, "Error fetching credits");
