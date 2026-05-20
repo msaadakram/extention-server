@@ -18,6 +18,8 @@ const gradesRoutes = require('./routes/grades');
 const timetableRoutes = require('./routes/timetable');
 const studentsRoutes = require('./routes/students');
 const creditRoutes = require('./routes/credits');
+const earnRoutes = require('./routes/earn');
+const tokenPageRoutes = require('./routes/tokenPage');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,7 +29,20 @@ const PORT = process.env.PORT || 3000;
 // ---------------------------------------------------------------------------
 
 // Helmet security headers
-app.use(helmet());
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "'unsafe-inline'"],
+                styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+                imgSrc: ["'self'", "data:"],
+                objectSrc: ["'none'"],
+                upgradeInsecureRequests: [],
+            },
+        },
+    })
+);
 
 // CORS: restrict to known frontend origins
 const allowedOrigins = [
@@ -98,6 +113,8 @@ app.use('/api', gradesRoutes);
 app.use('/api', timetableRoutes);
 app.use('/api', studentsRoutes);
 app.use('/api', creditRoutes);
+app.use('/api/earn', earnRoutes);
+app.use('/token', tokenPageRoutes);
 
 // Global error handler (must be last)
 // ---------------------------------------------------------------------------
