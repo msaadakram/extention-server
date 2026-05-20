@@ -20,15 +20,7 @@ function escapeRegex(string) {
 }
 
 /**
- * Save a grade entry with a dual-write inside a MongoDB transaction.
- *
- * Dual-write:
- *   1. 'grades' collection (shared leaderboard)
- *   2. Per-student collection named [studentId] (personal archive)
- *
- * Uses a Mongoose session/transaction for atomicity.
- * Falls back to non-transactional write if the MongoDB deployment
- * does not support transactions (e.g., standalone instances).
+ * Save a grade entry inside a MongoDB transaction (single collection write).
  */
 async function saveGrade(gradeData) {
     const {
@@ -76,7 +68,7 @@ async function saveGrade(gradeData) {
             try {
                 const result = await _dualWrite(newGradeData, studentId, session);
                 await session.commitTransaction();
-                logger.info({ studentId, courseName }, 'Grade saved (transactional dual-write)');
+                logger.info({ studentId, courseName }, 'Grade saved (transactional)');
                 return result;
             } catch (txError) {
                 try { await session.abortTransaction(); } catch (abortErr) {
@@ -87,10 +79,8 @@ async function saveGrade(gradeData) {
                 try { await session.endSession(); } catch (_) { }
             }
         } else {
-            // Fallback: no transaction support (standalone MongoDB, etc.)
-            // Perform writes sequentially; at-least-once semantics
             const result = await _dualWrite(newGradeData, studentId, null);
-            logger.info({ studentId, courseName }, 'Grade saved (non-transactional dual-write)');
+            logger.info({ studentId, courseName }, 'Grade saved (non-transactional)');
             return result;
         }
     } catch (error) {
@@ -138,29 +128,12 @@ async function _deploymentSupportsTransactions() {
 async function _dualWrite(newGradeData, studentId, session) {
     const sessionOption = session ? { session } : {};
 
-    // Write to the shared 'grades' collection (covers both leaderboard and personal archive)
+    // Write to the shared 'grades' collection only
     const result = await Grade.findOneAndUpdate(
         { courseName: newGradeData.courseName, studentId: newGradeData.studentId },
         newGradeData,
         { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOption }
     );
-
-    // Also try to write to the per-student collection for backward compat
-    // (only if the collection already exists — do NOT create new ones)
-    try {
-        const db = mongoose.connection.db;
-        const collections = await db.listCollections({ name: studentId }).toArray();
-        if (collections.length > 0) {
-            const coll = db.collection(studentId);
-            await coll.updateOne(
-                { courseName: newGradeData.courseName },
-                { $set: newGradeData },
-                { upsert: true, ...sessionOption }
-            );
-        }
-    } catch (_) {
-        // Silently skip per-student collection write; the shared write succeeded
-    }
 
     return { shared: result, personal: result };
 }

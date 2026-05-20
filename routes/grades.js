@@ -23,6 +23,23 @@ router.post('/save-grades', gradeSaveLimiter, validate(saveGradesSchema), async 
 });
 
 /**
+ * GET /api/grades/:studentId
+ * Fetch all grades for a specific student.
+ */
+router.get('/grades/:studentId', readLimiter, async (req, res, next) => {
+    try {
+        const { studentId } = req.params;
+        const Grade = require('../models/Grade');
+        const grades = await Grade.find({ studentId })
+            .sort({ courseName: 1 })
+            .select('courseName courseCode overallPercentage grade assessments classAverage timestamp');
+        res.json({ studentId, grades, count: grades.length });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * GET /api/leaderboard
  * Fetch leaderboard for a course, scoped to a student's classmates (via SubjectGroup).
  * With studentId: checks + deducts credits.
