@@ -18,6 +18,10 @@ const logger = pino({
 });
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+// Always use the deployed URL on Vercel
+const PUBLIC_URL = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : BASE_URL;
 const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 5;
 
 // ---------------------------------------------------------------------------
@@ -46,7 +50,7 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
     logger.info({ userId }, "Token generated");
 
     return res.status(201).json({
-      shortUrl: `${BASE_URL}/token/${token}`,
+      shortUrl: `${PUBLIC_URL}/token/${token}`,
       token,
     });
   } catch (err) {
