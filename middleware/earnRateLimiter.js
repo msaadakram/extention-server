@@ -2,10 +2,10 @@
 
 const rateLimit = require("express-rate-limit");
 
-// 5 requests per minute per IP for token generation
+// 10 requests per minute per IP for token generation
 const earnGenerateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 5,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
