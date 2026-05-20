@@ -28,7 +28,8 @@ const GradeSchema = new mongoose.Schema({
 // Indexes for leaderboard queries: find by courseName, sorted by overallPercentage descending
 GradeSchema.index({ courseName: 1, overallPercentage: -1 });
 // Compound index for the most common lookup: find a specific student's grade in a course
-GradeSchema.index({ courseName: 1, studentId: 1 }, { unique: true });
+// NOT unique because earn tokens/users share the same collection and have no studentId
+GradeSchema.index({ courseName: 1, studentId: 1 });
 // Index for checking student existence
 GradeSchema.index({ studentId: 1 });
 
