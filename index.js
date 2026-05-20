@@ -44,16 +44,21 @@ app.use(
     })
 );
 
-// CORS: restrict to known frontend origins
+// CORS: Allow all chrome-extension origins and known frontend origins
 const allowedOrigins = [
     'https://horizon.ucp.edu.pk',
-    'chrome-extension://jffoifnchlblakelloghlmjldkpniglj'
+    'https://extenstion-token-frontend.vercel.app',
+    'https://gradeserver-rho.vercel.app'
 ];
 
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (curl, server-to-server, Postman)
         if (!origin) return callback(null, true);
+        // Allow all chrome-extension origins
+        if (origin.startsWith('chrome-extension://')) {
+            return callback(null, true);
+        }
         if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
@@ -65,7 +70,7 @@ app.use(cors({
         corsErr.status = 403;
         callback(corsErr);
     },
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
 
