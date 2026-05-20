@@ -11,11 +11,5 @@
             "src": "/(.*)",
             "dest": "index.js"
         }
-    ],
-    "env": {
-        "MONGODB_URI": "@mongodb-uri",
-        "BASE_URL": "https://extention-server.vercel.app",
-        "CREDITS_REWARD": "5",
-        "TOKEN_EXPIRE_MINUTES": "10"
-    }
+    ]
 }
