@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Grade = require('../models/Grade');
 const SubjectGroup = require('../models/SubjectGroup');
+const privacyService = require('./privacyService');
 const pino = require('pino');
 
 const logger = pino({ name: 'gradeService' });
@@ -17,6 +18,45 @@ function escapeRegex(string) {
     // Second pass: escape only the regex special characters
     // Using a character class with each char individually escaped is safe from ReDoS
     return sanitized.replace(/[.*+\-?^${}()|[\]\\/]/g, '\\$&');
+}
+
+/**
+ * Enforce privacy at write-time by redacting fields before storage.
+ * This prevents hidden values from being persisted when privacy is enabled.
+ */
+function enforcePrivacyOnSave(gradeData, privacySetting) {
+    if (!gradeData || typeof gradeData !== 'object') return gradeData;
+    const shouldHideName = privacySetting ? !!privacySetting.hideName : !!(gradeData.hideName || gradeData.privacyMode);
+    const shouldHidePhoto = privacySetting ? !!privacySetting.hidePhoto : !!(gradeData.hidePhoto || gradeData.privacyMode);
+    gradeData.hideName = !!shouldHideName;
+    gradeData.hidePhoto = !!shouldHidePhoto;
+    if (shouldHideName) {
+        gradeData.studentName = '';
+    }
+    if (shouldHidePhoto) {
+        gradeData.studentImage = '';
+    }
+    return gradeData;
+}
+
+/**
+ * Apply privacy masking at read-time for responses.
+ */
+function applyPrivacyMask(gradeObj, privacyOverride) {
+    if (!gradeObj || typeof gradeObj !== 'object') return gradeObj;
+    if (gradeObj.studentName) {
+        gradeObj.studentName = gradeObj.studentName.split(/Faculty of/i)[0].trim();
+    }
+    const shouldHideName = privacyOverride ? !!privacyOverride.hideName : !!(gradeObj.hideName || gradeObj.privacyMode);
+    const shouldHidePhoto = privacyOverride ? !!privacyOverride.hidePhoto : !!(gradeObj.hidePhoto || gradeObj.privacyMode);
+    if (shouldHideName) {
+        gradeObj.studentName = 'Anonymous';
+        gradeObj.studentId = 'hidden';
+    }
+    if (shouldHidePhoto) {
+        gradeObj.studentImage = null;
+    }
+    return gradeObj;
 }
 
 /**
@@ -55,6 +95,15 @@ async function saveGrade(gradeData) {
         grade,
         timestamp: new Date()
     };
+
+    // Enforce privacy based on backend settings before persisting
+    let privacySetting = null;
+    try {
+        privacySetting = await privacyService.getPrivacy(studentId);
+    } catch (err) {
+        logger.warn({ err, studentId }, 'Privacy fetch failed; falling back to request flags');
+    }
+    enforcePrivacyOnSave(newGradeData, privacySetting);
 
     // Attempt a transactional dual-write; fall back gracefully if unsupported
     let session = null;
@@ -180,22 +229,19 @@ async function getLeaderboard(courseName, studentId) {
         .sort({ overallPercentage: -1 })
         .select('studentName studentImage overallPercentage grade studentId assessments timestamp privacyMode hideName hidePhoto');
 
-    // Apply privacy: granular hideName/hidePhoto with backward compat for old privacyMode
+    const studentIdList = grades.map((g) => g.studentId).filter(Boolean);
+    let privacyMap = new Map();
+    try {
+        privacyMap = await privacyService.getPrivacyMap(studentIdList);
+    } catch (err) {
+        logger.warn({ err }, 'Privacy map fetch failed; falling back to grade flags');
+    }
+
+    // Apply privacy: backend settings first; fallback to grade flags
     const cleanedGrades = grades.map((g) => {
-        const gradeObj = g.toObject();
-        if (gradeObj.studentName) {
-            gradeObj.studentName = gradeObj.studentName.split(/Faculty of/i)[0].trim();
-        }
-        const shouldHideName = gradeObj.hideName || gradeObj.privacyMode;
-        const shouldHidePhoto = gradeObj.hidePhoto || gradeObj.privacyMode;
-        if (shouldHideName) {
-            gradeObj.studentName = 'Anonymous';
-            gradeObj.studentId = 'hidden';
-        }
-        if (shouldHidePhoto) {
-            gradeObj.studentImage = null;
-        }
-        return gradeObj;
+        const gradeObj = g.toObject ? g.toObject() : g;
+        const override = privacyMap.get(gradeObj.studentId);
+        return applyPrivacyMask(gradeObj, override);
     });
 
     logger.info({ courseName, count: cleanedGrades.length }, 'Leaderboard fetched');

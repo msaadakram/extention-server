@@ -18,6 +18,7 @@ const gradesRoutes = require('./routes/grades');
 const timetableRoutes = require('./routes/timetable');
 const studentsRoutes = require('./routes/students');
 const creditRoutes = require('./routes/credits');
+const privacyRoutes = require('./routes/privacy');
 const earnRoutes = require('./routes/earn');
 const tokenPageRoutes = require('./routes/tokenPage');
 
@@ -118,6 +119,7 @@ app.use('/api', gradesRoutes);
 app.use('/api', timetableRoutes);
 app.use('/api', studentsRoutes);
 app.use('/api', creditRoutes);
+app.use('/api', privacyRoutes);
 app.use('/api/earn', earnRoutes);
 app.use('/token', tokenPageRoutes);
 
