@@ -22,6 +22,10 @@ const CUTY_API_TOKEN = process.env.CUTY_API_TOKEN || "";
 const CUTY_API_BASE_URL = process.env.CUTY_API_BASE_URL || "https://cuty.io/api";
 const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 50;
 
+function buildTokenUrl(token) {
+  return `${BASE_URL}/token/${token}`;
+}
+
 async function shortenUrl(longUrl) {
   if (!CUTY_API_TOKEN) {
     return { shortUrl: longUrl, usedCuty: false, error: "CUTY_API_TOKEN missing" };
@@ -68,6 +72,14 @@ async function shortenUrl(longUrl) {
   }
 }
 
+async function getReusableToken(userId) {
+  return RewardToken.findOne({
+    userId,
+    used: false,
+    courseName: "__earn_token__",
+  }).sort({ createdAt: -1 });
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/earn/generate-token
 // ---------------------------------------------------------------------------
@@ -85,17 +97,43 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
 
     const { userId } = value;
 
+    const reusableToken = await getReusableToken(userId);
+    if (reusableToken && reusableToken.token) {
+      const existingLongUrl = buildTokenUrl(reusableToken.token);
+      if (reusableToken.shortUrl) {
+        return res.status(200).json({
+          shortUrl: reusableToken.shortUrl,
+          token: reusableToken.token,
+          reused: true,
+        });
+      }
+
+      const shortResult = await shortenUrl(existingLongUrl);
+      if (shortResult.usedCuty) {
+        reusableToken.shortUrl = shortResult.shortUrl;
+        await reusableToken.save();
+      }
+
+      return res.status(200).json({
+        shortUrl: shortResult.shortUrl,
+        token: reusableToken.token,
+        reused: true,
+      });
+    }
+
     // Generate cryptographically secure token
     const token = crypto.randomBytes(32).toString("hex");
 
-    // Persist token
-    await RewardToken.create({ token, userId });
+    const longUrl = buildTokenUrl(token);
+    const tokenDoc = await RewardToken.create({ token, userId, shortUrl: longUrl });
+
+    const shortResult = await shortenUrl(longUrl);
+    if (shortResult.usedCuty) {
+      tokenDoc.shortUrl = shortResult.shortUrl;
+      await tokenDoc.save();
+    }
 
     logger.info({ userId }, "Token generated");
-
-    const longUrl = `${BASE_URL}/token/${token}`;
-    const shortResult = await shortenUrl(longUrl);
-
     if (!shortResult.usedCuty && shortResult.error) {
       logger.warn({ userId, error: shortResult.error }, "Cuty shorten failed");
     }
