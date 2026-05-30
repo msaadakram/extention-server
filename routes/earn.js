@@ -77,7 +77,36 @@ async function getReusableToken(userId) {
     userId,
     used: false,
     courseName: "__earn_token__",
+    token: { $exists: true, $ne: "" },
   }).sort({ createdAt: -1 });
+}
+
+async function createUniqueToken(userId, maxAttempts) {
+  const attempts = Number.isFinite(maxAttempts) ? maxAttempts : 3;
+  let lastError = null;
+
+  for (let i = 0; i < attempts; i += 1) {
+    const token = crypto.randomBytes(32).toString("hex");
+    const longUrl = buildTokenUrl(token);
+
+    try {
+      const tokenDoc = await RewardToken.create({ token, userId, shortUrl: longUrl });
+      return tokenDoc;
+    } catch (err) {
+      lastError = err;
+      if (err && err.code === 11000) {
+        logger.warn({ userId, attempt: i + 1 }, "Duplicate token detected, retrying");
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error("Failed to generate a unique token");
 }
 
 // ---------------------------------------------------------------------------
@@ -122,10 +151,9 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
     }
 
     // Generate cryptographically secure token
-    const token = crypto.randomBytes(32).toString("hex");
-
+    const tokenDoc = await createUniqueToken(userId, 3);
+    const token = tokenDoc.token;
     const longUrl = buildTokenUrl(token);
-    const tokenDoc = await RewardToken.create({ token, userId, shortUrl: longUrl });
 
     const shortResult = await shortenUrl(longUrl);
     if (shortResult.usedCuty) {
