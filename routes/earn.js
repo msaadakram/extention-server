@@ -18,7 +18,55 @@ const logger = pino({
 });
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 5;
+const CUTY_API_TOKEN = process.env.CUTY_API_TOKEN || "";
+const CUTY_API_BASE_URL = process.env.CUTY_API_BASE_URL || "https://cuty.io/api";
+const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 50;
+
+async function shortenUrl(longUrl) {
+  if (!CUTY_API_TOKEN) {
+    return { shortUrl: longUrl, usedCuty: false, error: "CUTY_API_TOKEN missing" };
+  }
+
+  if (typeof fetch !== "function") {
+    return { shortUrl: longUrl, usedCuty: false, error: "fetch unavailable" };
+  }
+
+  const apiUrl =
+    CUTY_API_BASE_URL +
+    "?api=" + encodeURIComponent(CUTY_API_TOKEN) +
+    "&url=" + encodeURIComponent(longUrl);
+
+  try {
+    const resp = await fetch(apiUrl, { method: "GET" });
+    const bodyText = await resp.text();
+    let data = null;
+    try {
+      data = JSON.parse(bodyText);
+    } catch (e) {
+      data = null;
+    }
+
+    if (!resp.ok) {
+      return {
+        shortUrl: longUrl,
+        usedCuty: false,
+        error: (data && data.message) ? data.message : "Cuty HTTP " + resp.status,
+      };
+    }
+
+    if (data && data.status === "success" && data.shortenedUrl) {
+      return { shortUrl: data.shortenedUrl, usedCuty: true };
+    }
+
+    if (data && data.status === "error" && data.message) {
+      return { shortUrl: longUrl, usedCuty: false, error: data.message };
+    }
+
+    return { shortUrl: longUrl, usedCuty: false, error: "Invalid Cuty response" };
+  } catch (err) {
+    return { shortUrl: longUrl, usedCuty: false, error: err.message };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/earn/generate-token
@@ -45,8 +93,15 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
 
     logger.info({ userId }, "Token generated");
 
+    const longUrl = `${BASE_URL}/token/${token}`;
+    const shortResult = await shortenUrl(longUrl);
+
+    if (!shortResult.usedCuty && shortResult.error) {
+      logger.warn({ userId, error: shortResult.error }, "Cuty shorten failed");
+    }
+
     return res.status(201).json({
-      shortUrl: `${BASE_URL}/token/${token}`,
+      shortUrl: shortResult.shortUrl,
       token,
     });
   } catch (err) {
