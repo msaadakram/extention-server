@@ -81,7 +81,7 @@ async function getReusableToken(userId) {
   }).sort({ createdAt: -1 });
 }
 
-async function createUniqueToken(userId, maxAttempts) {
+async function upsertTokenForUser(userId, maxAttempts) {
   const attempts = Number.isFinite(maxAttempts) ? maxAttempts : 3;
   let lastError = null;
 
@@ -90,7 +90,22 @@ async function createUniqueToken(userId, maxAttempts) {
     const longUrl = buildTokenUrl(token);
 
     try {
-      const tokenDoc = await RewardToken.create({ token, userId, shortUrl: longUrl });
+      const tokenDoc = await RewardToken.findOneAndUpdate(
+        { userId, courseName: "__earn_token__" },
+        {
+          $set: {
+            token,
+            shortUrl: longUrl,
+            used: false,
+            createdAt: new Date(),
+            courseName: "__earn_token__",
+            overallPercentage: 0,
+            grade: "N/A",
+          },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+
       return tokenDoc;
     } catch (err) {
       lastError = err;
@@ -150,8 +165,8 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
       });
     }
 
-    // Generate cryptographically secure token
-    const tokenDoc = await createUniqueToken(userId, 3);
+    // Generate cryptographically secure token (one active token per user)
+    const tokenDoc = await upsertTokenForUser(userId, 3);
     const token = tokenDoc.token;
     const longUrl = buildTokenUrl(token);
 
