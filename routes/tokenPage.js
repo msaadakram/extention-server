@@ -411,7 +411,19 @@ router.get("/:token", async (req, res) => {
 
       (async function verify() {
         try {
-          var resp = await fetch("/api/earn/verify/${token}");
+          var params = new URLSearchParams(window.location.search);
+          var accessKey = params.get("key");
+          if (!accessKey) {
+            show("error");
+            document.getElementById("error-heading").textContent = "Access Required";
+            document.getElementById("error-msg").textContent =
+              "Please open the short link to claim your credits.";
+            return;
+          }
+
+          var resp = await fetch(
+            "/api/earn/verify/${token}?key=" + encodeURIComponent(accessKey)
+          );
           var data = await resp.json();
 
           if (!resp.ok) {

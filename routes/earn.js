@@ -22,8 +22,15 @@ const CUTY_API_TOKEN = process.env.CUTY_API_TOKEN || "";
 const CUTY_API_BASE_URL = process.env.CUTY_API_BASE_URL || "https://cuty.io/api";
 const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 50;
 
-function buildTokenUrl(token) {
+function buildTokenUrl(token, accessKey) {
+  if (accessKey) {
+    return `${BASE_URL}/token/${token}?key=${encodeURIComponent(accessKey)}`;
+  }
   return `${BASE_URL}/token/${token}`;
+}
+
+function generateAccessKey() {
+  return crypto.randomBytes(16).toString("hex");
 }
 
 async function shortenUrl(longUrl) {
@@ -87,7 +94,7 @@ async function upsertTokenForUser(userId, maxAttempts) {
 
   for (let i = 0; i < attempts; i += 1) {
     const token = crypto.randomBytes(32).toString("hex");
-    const longUrl = buildTokenUrl(token);
+    const accessKey = generateAccessKey();
 
     try {
       const tokenDoc = await RewardToken.findOneAndUpdate(
@@ -95,12 +102,15 @@ async function upsertTokenForUser(userId, maxAttempts) {
         {
           $set: {
             token,
-            shortUrl: longUrl,
+            accessKey,
             used: false,
             createdAt: new Date(),
             courseName: "__earn_token__",
             overallPercentage: 0,
             grade: "N/A",
+          },
+          $unset: {
+            shortUrl: "",
           },
         },
         { new: true, upsert: true, setDefaultsOnInsert: true }
@@ -143,24 +153,38 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
 
     const reusableToken = await getReusableToken(userId);
     if (reusableToken && reusableToken.token) {
-      const existingLongUrl = buildTokenUrl(reusableToken.token);
+      let accessKey = reusableToken.accessKey;
+      if (!accessKey) {
+        accessKey = generateAccessKey();
+        reusableToken.accessKey = accessKey;
+        reusableToken.shortUrl = "";
+      }
+
+      const existingLongUrl = buildTokenUrl(reusableToken.token, accessKey);
       if (reusableToken.shortUrl) {
         return res.status(200).json({
           shortUrl: reusableToken.shortUrl,
-          token: reusableToken.token,
           reused: true,
         });
       }
 
       const shortResult = await shortenUrl(existingLongUrl);
-      if (shortResult.usedCuty) {
-        reusableToken.shortUrl = shortResult.shortUrl;
+      if (!shortResult.usedCuty) {
+        if (shortResult.error) {
+          logger.warn({ userId, error: shortResult.error }, "Cuty shorten failed");
+        }
         await reusableToken.save();
+        return res.status(503).json({
+          error: "Shortener unavailable. Please try again later.",
+          code: "SHORTENER_UNAVAILABLE",
+        });
       }
+
+      reusableToken.shortUrl = shortResult.shortUrl;
+      await reusableToken.save();
 
       return res.status(200).json({
         shortUrl: shortResult.shortUrl,
-        token: reusableToken.token,
         reused: true,
       });
     }
@@ -168,22 +192,32 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
     // Generate cryptographically secure token (one active token per user)
     const tokenDoc = await upsertTokenForUser(userId, 3);
     const token = tokenDoc.token;
-    const longUrl = buildTokenUrl(token);
+    const accessKey = tokenDoc.accessKey || generateAccessKey();
+    if (!tokenDoc.accessKey) {
+      tokenDoc.accessKey = accessKey;
+    }
+
+    const longUrl = buildTokenUrl(token, accessKey);
 
     const shortResult = await shortenUrl(longUrl);
-    if (shortResult.usedCuty) {
-      tokenDoc.shortUrl = shortResult.shortUrl;
+    if (!shortResult.usedCuty) {
+      if (shortResult.error) {
+        logger.warn({ userId, error: shortResult.error }, "Cuty shorten failed");
+      }
       await tokenDoc.save();
+      return res.status(503).json({
+        error: "Shortener unavailable. Please try again later.",
+        code: "SHORTENER_UNAVAILABLE",
+      });
     }
 
+    tokenDoc.shortUrl = shortResult.shortUrl;
+    await tokenDoc.save();
+
     logger.info({ userId }, "Token generated");
-    if (!shortResult.usedCuty && shortResult.error) {
-      logger.warn({ userId, error: shortResult.error }, "Cuty shorten failed");
-    }
 
     return res.status(201).json({
       shortUrl: shortResult.shortUrl,
-      token,
     });
   } catch (err) {
     logger.error(err, "Error generating token");
@@ -200,12 +234,20 @@ router.post("/generate-token", earnGenerateLimiter, async (req, res) => {
 router.get("/verify/:token", async (req, res) => {
   try {
     const { token } = req.params;
+    const accessKey = req.query.key;
 
     // Validate param exists
     if (!token || typeof token !== "string" || token.trim().length === 0) {
       return res.status(400).json({
         error: "Token is required",
         code: "VALIDATION_ERROR",
+      });
+    }
+
+    if (!accessKey || typeof accessKey !== "string" || accessKey.trim().length === 0) {
+      return res.status(400).json({
+        error: "Access key is required",
+        code: "ACCESS_KEY_REQUIRED",
       });
     }
 
@@ -216,6 +258,13 @@ router.get("/verify/:token", async (req, res) => {
       return res.status(404).json({
         error: "Token not found or expired",
         code: "TOKEN_NOT_FOUND",
+      });
+    }
+
+    if (!rewardToken.accessKey || rewardToken.accessKey !== accessKey.trim()) {
+      return res.status(403).json({
+        error: "Invalid access key. Please open the short link to claim credits.",
+        code: "ACCESS_KEY_INVALID",
       });
     }
 

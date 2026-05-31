@@ -10,6 +10,8 @@ const rewardTokenSchema = new mongoose.Schema(
   {
     token: { type: String, required: true },
     userId: { type: String, required: true },
+    accessKey: { type: String },
+    shortUrl: { type: String },
     used: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
     courseName: { type: String, default: "__earn_token__" },
