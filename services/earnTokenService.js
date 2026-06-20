@@ -106,6 +106,7 @@ async function upsertTokenForUser(userId, maxAttempts) {
             courseName: COURSE_NAMES.EARN_TOKEN,
             overallPercentage: 0,
             grade: "N/A",
+            studentId: userId,
           },
           $unset: {
             shortUrl: "",

@@ -6,3 +6,4 @@ package-lock.json
 mongodb.log*
 mongodb_data/
 .vercel
+.env*.local
