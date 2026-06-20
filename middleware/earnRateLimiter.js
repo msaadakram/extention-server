@@ -8,6 +8,7 @@ const earnGenerateLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
   message: {
     error: "Too many requests, please try again later.",
     code: "RATE_LIMIT_EXCEEDED",
@@ -20,6 +21,7 @@ const earnVerifyLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
   message: {
     error: "Too many verification attempts, please try again later.",
     code: "RATE_LIMIT_EXCEEDED",
