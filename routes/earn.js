@@ -1,13 +1,26 @@
 "use strict";
 
 const express = require("express");
-const crypto = require("crypto");
 const pino = require("pino");
 
 const RewardToken = require("../models/RewardToken");
-const { earnGenerateLimiter } = require("../middleware/earnRateLimiter");
-const { generateTokenSchema } = require("../validators/earnValidator");
+const { earnGenerateLimiter, earnVerifyLimiter } = require("../middleware/earnRateLimiter");
+const { validate, validateParams, validateQuery } = require("../middleware/validate");
+const {
+  generateTokenSchema,
+  verifyTokenParamsSchema,
+  verifyTokenQuerySchema,
+  creditsParamsSchema,
+} = require("../validators/earnValidator");
 const creditService = require("../services/creditService");
+const {
+  buildTokenUrl,
+  generateAccessKey,
+  shortenUrl,
+  getReusableToken,
+  upsertTokenForUser
+} = require("../services/earnTokenService");
+const { DEFAULTS } = require("../config/constants");
 
 const router = express.Router();
 const logger = pino({
@@ -17,122 +30,6 @@ const logger = pino({
   },
 });
 
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const CUTY_API_TOKEN = process.env.CUTY_API_TOKEN || "";
-const CUTY_API_BASE_URL = process.env.CUTY_API_BASE_URL || "https://cuty.io/api";
-const CREDITS_REWARD = Number(process.env.CREDITS_REWARD) || 50;
-
-function buildTokenUrl(token, accessKey) {
-  if (accessKey) {
-    return `${BASE_URL}/token/${token}?key=${encodeURIComponent(accessKey)}`;
-  }
-  return `${BASE_URL}/token/${token}`;
-}
-
-function generateAccessKey() {
-  return crypto.randomBytes(16).toString("hex");
-}
-
-async function shortenUrl(longUrl) {
-  if (!CUTY_API_TOKEN) {
-    return { shortUrl: longUrl, usedCuty: false, error: "CUTY_API_TOKEN missing" };
-  }
-
-  if (typeof fetch !== "function") {
-    return { shortUrl: longUrl, usedCuty: false, error: "fetch unavailable" };
-  }
-
-  const apiUrl =
-    CUTY_API_BASE_URL +
-    "?api=" + encodeURIComponent(CUTY_API_TOKEN) +
-    "&url=" + encodeURIComponent(longUrl);
-
-  try {
-    const resp = await fetch(apiUrl, { method: "GET" });
-    const bodyText = await resp.text();
-    let data = null;
-    try {
-      data = JSON.parse(bodyText);
-    } catch (e) {
-      data = null;
-    }
-
-    if (!resp.ok) {
-      return {
-        shortUrl: longUrl,
-        usedCuty: false,
-        error: (data && data.message) ? data.message : "Cuty HTTP " + resp.status,
-      };
-    }
-
-    if (data && data.status === "success" && data.shortenedUrl) {
-      return { shortUrl: data.shortenedUrl, usedCuty: true };
-    }
-
-    if (data && data.status === "error" && data.message) {
-      return { shortUrl: longUrl, usedCuty: false, error: data.message };
-    }
-
-    return { shortUrl: longUrl, usedCuty: false, error: "Invalid Cuty response" };
-  } catch (err) {
-    return { shortUrl: longUrl, usedCuty: false, error: err.message };
-  }
-}
-
-async function getReusableToken(userId) {
-  return RewardToken.findOne({
-    userId,
-    used: false,
-    courseName: "__earn_token__",
-    token: { $exists: true, $ne: "" },
-  }).sort({ createdAt: -1 });
-}
-
-async function upsertTokenForUser(userId, maxAttempts) {
-  const attempts = Number.isFinite(maxAttempts) ? maxAttempts : 3;
-  let lastError = null;
-
-  for (let i = 0; i < attempts; i += 1) {
-    const token = crypto.randomBytes(32).toString("hex");
-    const accessKey = generateAccessKey();
-
-    try {
-      const tokenDoc = await RewardToken.findOneAndUpdate(
-        { userId, courseName: "__earn_token__" },
-        {
-          $set: {
-            token,
-            accessKey,
-            used: false,
-            createdAt: new Date(),
-            courseName: "__earn_token__",
-            overallPercentage: 0,
-            grade: "N/A",
-          },
-          $unset: {
-            shortUrl: "",
-          },
-        },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-      );
-
-      return tokenDoc;
-    } catch (err) {
-      lastError = err;
-      if (err && err.code === 11000) {
-        logger.warn({ userId, attempt: i + 1 }, "Duplicate token detected, retrying");
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  throw new Error("Failed to generate a unique token");
-}
 
 // ---------------------------------------------------------------------------
 // POST /api/earn/generate-token
@@ -277,7 +174,7 @@ router.get("/verify/:token", async (req, res) => {
 
     // Add credits to the creditService system (uses '__credits__' courseName)
     // This is the same system the extension reads via GET /api/credits/:studentId
-    const creditResult = await creditService.addCredits(rewardToken.userId, CREDITS_REWARD);
+    const creditResult = await creditService.addCredits(rewardToken.userId, DEFAULTS.CREDITS_REWARD);
 
     // Mark token as used
     rewardToken.used = true;

@@ -1,8 +1,9 @@
 const pino = require('pino');
 const Privacy = require('../models/Privacy');
+const { COURSE_NAMES } = require('../config/constants');
 
 const logger = pino({ name: 'privacyService' });
-const COURSE = '__privacy__';
+const COURSE = COURSE_NAMES.PRIVACY;
 
 async function getPrivacy(studentId) {
     try {

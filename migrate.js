@@ -8,14 +8,15 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { COURSE_NAMES, DEFAULTS } = require('./config/constants');
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const DRY_RUN = process.argv.includes('--dry-run');
 const MIGRATE_EARN_CREDITS = process.argv.includes('--migrate-earn-credits');
 
-const EARN_USER_COURSE = '__earn_user__';
-const CREDITS_COURSE = '__credits__';
-const CREDITS_DEFAULT = 10;
+const EARN_USER_COURSE = COURSE_NAMES.EARN_USER;
+const CREDITS_COURSE = COURSE_NAMES.CREDITS;
+const CREDITS_DEFAULT = DEFAULTS.CREDITS_DEFAULT;
 
 function normalizeCredits(value, fallback) {
     const n = Number(value);

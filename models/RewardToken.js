@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { COURSE_NAMES } = require("../config/constants");
 
 // Store tokens in existing 'grades' collection to avoid 500-collection M0 limit
 // We use courseName: '__earn_token__' to distinguish from grade docs
@@ -14,7 +15,7 @@ const rewardTokenSchema = new mongoose.Schema(
     shortUrl: { type: String },
     used: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
-    courseName: { type: String, default: "__earn_token__" },
+    courseName: { type: String, default: COURSE_NAMES.EARN_TOKEN },
     overallPercentage: { type: Number, default: 0 },
     grade: { type: String, default: "N/A" }
   },

@@ -1,58 +1,47 @@
 const mongoose = require('mongoose');
 const pino = require('pino');
+const { COURSE_NAMES, DEFAULTS } = require('../config/constants');
 
 const logger = pino({ name: 'creditService' });
-const CREDITS_DEFAULT = 10;
+const CREDITS_DEFAULT = DEFAULTS.CREDITS_DEFAULT;
 
 // Store credits in 'grades' collection (no new collection = no limit hit)
-const COURSE = '__credits__';
+const COURSE = COURSE_NAMES.CREDITS;
 
 async function _getOrCreate(studentId) {
     const db = mongoose.connection.db;
     if (!db) throw new Error('No database connection');
 
     const coll = db.collection('grades');
+    const now = new Date();
 
-    // Try find existing
-    let doc = null;
     try {
-        doc = await coll.findOne({ studentId, courseName: COURSE });
+        const result = await coll.findOneAndUpdate(
+            { studentId, courseName: COURSE },
+            [
+                {
+                    $set: {
+                        studentId: studentId,
+                        courseName: COURSE,
+                        overallPercentage: { $ifNull: ["$overallPercentage", 0] },
+                        grade: { $ifNull: ["$grade", "N/A"] },
+                        credits: { $ifNull: ["$credits", CREDITS_DEFAULT] },
+                        timestamp: { $ifNull: ["$timestamp", now] }
+                    }
+                }
+            ],
+            { upsert: true, returnDocument: 'after', returnOriginal: false }
+        );
+
+        const doc = result && result.value ? result.value : result;
+        if (!doc) {
+            throw new Error('Failed to get or create credit record for ' + studentId);
+        }
+        return doc;
     } catch (e) {
-        logger.error({ err: e }, 'findOne failed in _getOrCreate');
+        logger.error({ err: e }, 'findOneAndUpdate failed in _getOrCreate');
         throw e;
     }
-
-    if (!doc) {
-        try {
-            await coll.insertOne({
-                studentId,
-                courseName: COURSE,
-                overallPercentage: 0,
-                grade: 'N/A',
-                credits: CREDITS_DEFAULT,
-                timestamp: new Date()
-            });
-            doc = { studentId, courseName: COURSE, credits: CREDITS_DEFAULT };
-        } catch (e) {
-            // Duplicate key race - try find again
-            if (e.code === 11000) {
-                doc = await coll.findOne({ studentId, courseName: COURSE });
-            } else {
-                logger.error({ err: e }, 'insertOne failed in _getOrCreate');
-                throw e;
-            }
-        }
-    }
-
-    if (!doc) {
-        throw new Error('Failed to get or create credit record for ' + studentId);
-    }
-
-    if (doc.credits === undefined || doc.credits === null) {
-        doc.credits = CREDITS_DEFAULT;
-    }
-
-    return doc;
 }
 
 async function getCredits(studentId) {
@@ -63,32 +52,65 @@ async function getCredits(studentId) {
 
 async function deductCredit(studentId) {
     logger.info({ studentId }, 'Deducting credit');
-    const doc = await _getOrCreate(studentId);
-    const newCredits = Math.max(0, (doc.credits || 0) - 1);
-
     const db = mongoose.connection.db;
-    await db.collection('grades').updateOne(
-        { _id: doc._id },
-        { $set: { credits: newCredits, timestamp: new Date() } }
+    const coll = db.collection('grades');
+    const now = new Date();
+
+    const result = await coll.findOneAndUpdate(
+        { studentId, courseName: COURSE },
+        [
+            {
+                $set: {
+                    studentId: studentId,
+                    courseName: COURSE,
+                    overallPercentage: { $ifNull: ["$overallPercentage", 0] },
+                    grade: { $ifNull: ["$grade", "N/A"] },
+                    credits: {
+                        $max: [
+                            0,
+                            { $subtract: [{ $ifNull: ["$credits", CREDITS_DEFAULT] }, 1] }
+                        ]
+                    },
+                    timestamp: now
+                }
+            }
+        ],
+        { upsert: true, returnDocument: 'after', returnOriginal: false }
     );
 
-    logger.info({ studentId, credits: newCredits }, 'Credit deducted');
-    return { studentId: doc.studentId, credits: newCredits };
+    const doc = result && result.value ? result.value : result;
+    logger.info({ studentId, credits: doc.credits }, 'Credit deducted');
+    return { studentId: doc.studentId, credits: doc.credits };
 }
 
 async function addCredits(studentId, amount) {
     logger.info({ studentId, amount }, 'Adding credits');
-    const doc = await _getOrCreate(studentId);
-    const newCredits = (doc.credits || 0) + amount;
-
     const db = mongoose.connection.db;
-    await db.collection('grades').updateOne(
-        { _id: doc._id },
-        { $set: { credits: newCredits, timestamp: new Date() } }
+    const coll = db.collection('grades');
+    const now = new Date();
+
+    const result = await coll.findOneAndUpdate(
+        { studentId, courseName: COURSE },
+        [
+            {
+                $set: {
+                    studentId: studentId,
+                    courseName: COURSE,
+                    overallPercentage: { $ifNull: ["$overallPercentage", 0] },
+                    grade: { $ifNull: ["$grade", "N/A"] },
+                    credits: {
+                        $add: [{ $ifNull: ["$credits", CREDITS_DEFAULT] }, amount]
+                    },
+                    timestamp: now
+                }
+            }
+        ],
+        { upsert: true, returnDocument: 'after', returnOriginal: false }
     );
 
-    logger.info({ studentId, credits: newCredits }, 'Credits added');
-    return { studentId: doc.studentId, credits: newCredits };
+    const doc = result && result.value ? result.value : result;
+    logger.info({ studentId, credits: doc.credits }, 'Credits added');
+    return { studentId: doc.studentId, credits: doc.credits };
 }
 
 module.exports = { getCredits, deductCredit, addCredits };

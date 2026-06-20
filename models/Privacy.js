@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { COURSE_NAMES } = require('../config/constants');
 
 // Store privacy settings in existing 'grades' collection to avoid 500-collection M0 limit
 // We use courseName: '__privacy__' to distinguish from grade docs
@@ -10,7 +11,7 @@ const PrivacySchema = new mongoose.Schema(
         hideName: { type: Boolean, default: false },
         hidePhoto: { type: Boolean, default: false },
         updatedAt: { type: Date, default: Date.now },
-        courseName: { type: String, default: '__privacy__' },
+        courseName: { type: String, default: COURSE_NAMES.PRIVACY },
         overallPercentage: { type: Number, default: 0 },
         grade: { type: String, default: 'N/A' }
     },

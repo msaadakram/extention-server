@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { COURSE_NAMES } = require("../config/constants");
 
 // Store user credits in existing 'grades' collection to avoid 500-collection M0 limit
 // We use courseName: '__earn_user__' to distinguish from grade docs
@@ -12,7 +13,7 @@ const userSchema = new mongoose.Schema(
     username: { type: String },
     credits: { type: Number, default: 0 },
     createdAt: { type: Date, default: Date.now },
-    courseName: { type: String, default: "__earn_user__" },
+    courseName: { type: String, default: COURSE_NAMES.EARN_USER },
     overallPercentage: { type: Number, default: 0 },
     grade: { type: String, default: "N/A" }
   },
