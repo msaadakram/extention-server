@@ -8,7 +8,7 @@ const COURSE_NAMES = Object.freeze({
 });
 
 const DEFAULTS = Object.freeze({
-  CREDITS_DEFAULT: 10,
+  CREDITS_DEFAULT: 500,
   CREDITS_REWARD: Number(process.env.CREDITS_REWARD) || 50,
   BASE_URL: process.env.BASE_URL || "http://localhost:3000",
   CUTY_API_TOKEN: process.env.CUTY_API_TOKEN || "",

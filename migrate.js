@@ -3,7 +3,7 @@
  * Migrate all per-student collections into the shared 'grades' collection,
  * then drop the per-student collections.
  *
- * Usage: node migrate.js [--dry-run] [--migrate-earn-credits]
+ * Usage: node migrate.js [--dry-run] [--migrate-earn-credits] [--migrate-bump-credits]
  */
 
 require('dotenv').config();
@@ -13,6 +13,7 @@ const { COURSE_NAMES, DEFAULTS } = require('./config/constants');
 const MONGODB_URI = process.env.MONGODB_URI;
 const DRY_RUN = process.argv.includes('--dry-run');
 const MIGRATE_EARN_CREDITS = process.argv.includes('--migrate-earn-credits');
+const MIGRATE_BUMP_CREDITS = process.argv.includes('--migrate-bump-credits');
 
 const EARN_USER_COURSE = COURSE_NAMES.EARN_USER;
 const CREDITS_COURSE = COURSE_NAMES.CREDITS;
@@ -21,6 +22,44 @@ const CREDITS_DEFAULT = DEFAULTS.CREDITS_DEFAULT;
 function normalizeCredits(value, fallback) {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
+}
+
+async function migrateBumpCredits(db) {
+    console.log('');
+    console.log('=== Bump Credits Migration (set min 500 credits) ===');
+
+    const gradesColl = db.collection('grades');
+    const records = await gradesColl.find({ courseName: CREDITS_COURSE }).toArray();
+
+    console.log(`Found ${records.length} total credit records`);
+
+    const belowThreshold = records.filter(r => (r.credits || 0) < CREDITS_DEFAULT);
+    console.log(`Records below ${CREDITS_DEFAULT}: ${belowThreshold.length}`);
+
+    if (DRY_RUN) {
+        for (const r of belowThreshold) {
+            console.log(`  DRY RUN: would bump ${r.studentId} from ${r.credits} to ${CREDITS_DEFAULT}`);
+        }
+        console.log('');
+        console.log('DRY RUN — no changes made.');
+        return;
+    }
+
+    let bumped = 0;
+    for (const r of belowThreshold) {
+        try {
+            await gradesColl.updateOne(
+                { _id: r._id },
+                { $set: { credits: CREDITS_DEFAULT, timestamp: new Date() } }
+            );
+            bumped++;
+        } catch (err) {
+            console.error(`  ERROR bumping ${r.studentId}:`, err.message);
+        }
+    }
+
+    console.log('');
+    console.log(`Bumped ${bumped} records to ${CREDITS_DEFAULT} credits.`);
 }
 
 async function migrateEarnCredits(db) {
@@ -241,6 +280,10 @@ async function migrate() {
         if (stillRemaining.length > 0) {
             console.log(`Still remaining (${stillRemaining.length}):`, stillRemaining.join(', '));
         }
+    }
+
+    if (MIGRATE_BUMP_CREDITS) {
+        await migrateBumpCredits(db);
     }
 
     if (MIGRATE_EARN_CREDITS) {

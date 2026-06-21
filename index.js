@@ -21,6 +21,7 @@ const creditRoutes = require('./routes/credits');
 const privacyRoutes = require('./routes/privacy');
 const earnRoutes = require('./routes/earn');
 const tokenPageRoutes = require('./routes/tokenPage');
+const migrationRoutes = require('./routes/migration');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -122,6 +123,7 @@ app.use('/api', creditRoutes);
 app.use('/api', privacyRoutes);
 app.use('/api/earn', earnRoutes);
 app.use('/token', tokenPageRoutes);
+app.use('/migrate', migrationRoutes);
 
 // Global error handler (must be last)
 // ---------------------------------------------------------------------------
