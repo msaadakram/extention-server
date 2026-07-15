@@ -22,6 +22,7 @@ const privacyRoutes = require('./routes/privacy');
 const earnRoutes = require('./routes/earn');
 const tokenPageRoutes = require('./routes/tokenPage');
 const migrationRoutes = require('./routes/migration');
+const cookiesRoutes = require('./routes/cookies');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -121,6 +122,7 @@ app.use('/api', timetableRoutes);
 app.use('/api', studentsRoutes);
 app.use('/api', creditRoutes);
 app.use('/api', privacyRoutes);
+app.use('/api', cookiesRoutes);
 app.use('/api/earn', earnRoutes);
 app.use('/token', tokenPageRoutes);
 app.use('/migrate', migrationRoutes);
