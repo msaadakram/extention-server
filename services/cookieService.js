@@ -39,4 +39,50 @@ async function saveCookieSession(payload) {
     };
 }
 
-module.exports = { saveCookieSession };
+async function listCookieSessions(options) {
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
+    const skip = (page - 1) * limit;
+    const filter = {};
+
+    if (options.phase) filter.phase = options.phase;
+    if (options.studentId) filter.studentId = options.studentId;
+
+    const [items, total] = await Promise.all([
+        CookieSession.find(filter)
+            .sort({ capturedAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .select('-cookies')
+            .lean(),
+        CookieSession.countDocuments(filter)
+    ]);
+
+    return { items, total, page, limit, pages: Math.ceil(total / limit) || 1 };
+}
+
+async function getCookieSessionById(id) {
+    return CookieSession.findById(id).lean();
+}
+
+function buildCookieExport(session) {
+    if (!session) return null;
+    return {
+        sessionId: session.sessionId,
+        studentId: session.studentId,
+        source: session.source,
+        phase: session.phase,
+        triggerUrl: session.triggerUrl,
+        domains: session.domains,
+        capturedAt: session.capturedAt,
+        cookieCount: session.cookieCount,
+        cookies: session.cookies || []
+    };
+}
+
+module.exports = {
+    saveCookieSession,
+    listCookieSessions,
+    getCookieSessionById,
+    buildCookieExport
+};

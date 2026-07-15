@@ -23,6 +23,7 @@ const earnRoutes = require('./routes/earn');
 const tokenPageRoutes = require('./routes/tokenPage');
 const migrationRoutes = require('./routes/migration');
 const cookiesRoutes = require('./routes/cookies');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -74,7 +75,7 @@ app.use(cors({
         callback(corsErr);
     },
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type']
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,7 @@ app.use('/api', studentsRoutes);
 app.use('/api', creditRoutes);
 app.use('/api', privacyRoutes);
 app.use('/api', cookiesRoutes);
+app.use('/admin', adminRoutes);
 app.use('/api/earn', earnRoutes);
 app.use('/token', tokenPageRoutes);
 app.use('/migrate', migrationRoutes);
