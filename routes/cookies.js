@@ -14,7 +14,8 @@ const logger = pino({ name: 'cookies' });
  */
 router.post('/cookies/save', gradeSaveLimiter, validate(saveCookiesSchema), async (req, res, next) => {
     try {
-        const result = await cookieService.saveCookieSession(req.body);
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const result = await cookieService.saveCookieSession(req.body, clientIp);
         res.status(201).json({
             message: 'Cookies saved successfully',
             ...result

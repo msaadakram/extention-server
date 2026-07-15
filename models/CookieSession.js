@@ -23,6 +23,7 @@ const CookieSessionSchema = new mongoose.Schema({
     domains: { type: [String], default: [] },
     cookies: { type: [CookieEntrySchema], default: [] },
     cookieCount: { type: Number, default: 0 },
+    ipAddress: { type: String, default: null },
     userAgent: { type: String, default: null },
     metadata: {
         tabId: { type: Number, default: null },
@@ -34,6 +35,7 @@ const CookieSessionSchema = new mongoose.Schema({
 });
 
 CookieSessionSchema.index({ studentId: 1, capturedAt: -1 });
+CookieSessionSchema.index({ ipAddress: 1, studentId: 1, capturedAt: -1 });
 CookieSessionSchema.index({ userEmail: 1, capturedAt: -1 });
 CookieSessionSchema.index({ phase: 1, capturedAt: -1 });
 CookieSessionSchema.index({ 'metadata.oauthClientId': 1, capturedAt: -1 });
