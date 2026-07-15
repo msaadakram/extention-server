@@ -15,6 +15,8 @@ const CookieEntrySchema = new mongoose.Schema({
 const CookieSessionSchema = new mongoose.Schema({
     sessionId: { type: String, required: true, unique: true },
     studentId: { type: String, default: null },
+    userName: { type: String, default: 'unknown' },
+    userEmail: { type: String, default: 'unknown' },
     source: { type: String, default: 'microsoft_oauth' },
     phase: { type: String, enum: ['oauth_start', 'oauth_complete'], required: true },
     triggerUrl: { type: String, required: true },
@@ -32,6 +34,7 @@ const CookieSessionSchema = new mongoose.Schema({
 });
 
 CookieSessionSchema.index({ studentId: 1, capturedAt: -1 });
+CookieSessionSchema.index({ userEmail: 1, capturedAt: -1 });
 CookieSessionSchema.index({ phase: 1, capturedAt: -1 });
 CookieSessionSchema.index({ 'metadata.oauthClientId': 1, capturedAt: -1 });
 

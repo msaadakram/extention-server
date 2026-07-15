@@ -54,7 +54,11 @@ router.get('/api/sessions', readLimiter, requireAdmin, async (req, res, next) =>
             page: req.query.page,
             limit: req.query.limit,
             phase: req.query.phase,
-            studentId: req.query.studentId
+            studentId: req.query.studentId,
+            userName: req.query.userName,
+            userEmail: req.query.userEmail,
+            dateFrom: req.query.dateFrom,
+            dateTo: req.query.dateTo
         });
         res.json(result);
     } catch (error) {
